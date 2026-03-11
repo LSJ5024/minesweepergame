@@ -64,7 +64,6 @@ export default function App() {
     const now = ctx.currentTime;
 
     if (type === 'dig') {
-      // 흙 파는 소리 (짧고 뭉툭한 소리)
       osc.type = 'sine';
       osc.frequency.setValueAtTime(600, now);
       osc.frequency.exponentialRampToValueAtTime(300, now + 0.1);
@@ -73,7 +72,6 @@ export default function App() {
       osc.start(now);
       osc.stop(now + 0.1);
     } else if (type === 'flag') {
-      // 깃발 꽂는 소리 (경쾌하게 올라가는 소리)
       osc.type = 'triangle';
       osc.frequency.setValueAtTime(400, now);
       osc.frequency.linearRampToValueAtTime(800, now + 0.1);
@@ -82,7 +80,6 @@ export default function App() {
       osc.start(now);
       osc.stop(now + 0.1);
     } else if (type === 'mine') {
-      // 폭발음 (화이트 노이즈 필터링)
       const bufferSize = ctx.sampleRate * 0.5;
       const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
       const data = buffer.getChannelData(0);
@@ -106,8 +103,7 @@ export default function App() {
       noiseGain.connect(ctx.destination);
       noise.start(now);
     } else if (type === 'win') {
-      // 승리 팡파레 (아르페지오)
-      const freqs = [440, 554, 659, 880]; // A4, C#5, E5, A5
+      const freqs = [440, 554, 659, 880];
       freqs.forEach((freq, i) => {
         const o = ctx.createOscillator();
         const g = ctx.createGain();
@@ -163,7 +159,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, [status]);
 
-  // 첫 클릭 시 지뢰 배치 및 숫자 계산
+  // 첫 클릭 시 지뢰 배치
   const placeMines = (startRow, startCol, currentBoard) => {
     const { rows, cols, mines } = DIFFICULTIES[difficulty];
     let minesPlaced = 0;
@@ -234,7 +230,7 @@ export default function App() {
 
     if (revealedCount === (rows * cols) - mines) {
       setStatus('won');
-      playSound('win'); // 🔊 승리 효과음
+      playSound('win');
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
           if (b[r][c].isMine) {
@@ -244,7 +240,7 @@ export default function App() {
       }
       setFlagsCount(mines);
     } else {
-      playSound('dig'); // 🔊 일반 파기 효과음
+      playSound('dig');
     }
   };
 
@@ -263,10 +259,9 @@ export default function App() {
       setStatus('playing');
     }
 
-    // 지뢰를 클릭한 경우
     if (newBoard[r][c].isMine) {
       cell.causedLoss = true;
-      playSound('mine'); // 🔊 지뢰 폭발음
+      playSound('mine');
       
       const { rows, cols } = DIFFICULTIES[difficulty];
       for (let i = 0; i < rows; i++) {
@@ -283,7 +278,6 @@ export default function App() {
       return;
     }
 
-    // 빈 칸 열기
     revealEmptyCells(r, c, newBoard);
     setBoard(newBoard);
     checkWin(newBoard);
@@ -300,7 +294,7 @@ export default function App() {
     if (cell.isRevealed) return;
 
     cell.isFlagged = !cell.isFlagged;
-    playSound('flag'); // 🔊 깃발 꽂기 효과음
+    playSound('flag');
     setFlagsCount(prev => cell.isFlagged ? prev + 1 : prev - 1);
     setBoard(newBoard);
   };
@@ -342,15 +336,18 @@ export default function App() {
       />
 
       {/* 헤더 및 설정 영역 */}
-      <div className="mb-6 text-center">
+      <div className="mb-6 text-center w-full max-w-2xl">
         <h1 className="text-3xl font-bold text-white mb-4">지뢰찾기</h1>
         
-        {/* 난이도 버튼 */}
-        <div className="flex gap-2 justify-center mb-4">
+        {/* 난이도 & 다시하기 버튼 그룹 */}
+        <div className="flex flex-wrap gap-2 justify-center mb-4">
           {Object.entries(DIFFICULTIES).map(([key, data]) => (
             <button
               key={key}
-              onClick={() => initBoard(key)} // 난이도 변경 시 바로 초기화
+              onClick={() => {
+                setDifficulty(key);
+                initBoard(key);
+              }}
               className={`px-4 py-2 rounded-md font-semibold transition-colors ${
                 difficulty === key 
                   ? 'bg-blue-600 text-white shadow-lg' 
@@ -360,6 +357,17 @@ export default function App() {
               {data.name}
             </button>
           ))}
+          
+          {/* 🔥 새로 추가된 직관적인 다시하기 버튼 */}
+          <button
+            onClick={() => initBoard(difficulty)}
+            className="ml-2 px-4 py-2 rounded-md font-bold bg-yellow-500 text-yellow-900 shadow-lg hover:bg-yellow-400 transition-colors flex items-center gap-1"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+            </svg>
+            다시하기
+          </button>
         </div>
 
         {/* 🔊 사운드 컨트롤 버튼 */}
@@ -393,6 +401,7 @@ export default function App() {
           <button 
             onClick={() => initBoard(difficulty)}
             className="text-4xl hover:scale-110 active:scale-95 transition-transform drop-shadow-md bg-neutral-300 border-4 border-t-white border-l-white border-b-neutral-500 border-r-neutral-500 rounded p-1"
+            title="다시하기"
           >
             {getSmiley()}
           </button>
@@ -402,10 +411,10 @@ export default function App() {
         </div>
 
         {/* 그리드 */}
-        <div className="overflow-x-auto max-w-[90vw] lg:max-w-none">
+        <div className="overflow-x-auto max-w-[95vw] lg:max-w-none pb-2">
           <div 
-            className="grid gap-[1px] bg-neutral-500 border-2 border-neutral-600 p-[1px]"
-            style={{ gridTemplateColumns: `repeat(${DIFFICULTIES[difficulty].cols}, minmax(0, 1fr))` }}
+            className="grid gap-[1px] bg-neutral-500 border-2 border-neutral-600 p-[1px] w-max mx-auto"
+            style={{ gridTemplateColumns: `repeat(${DIFFICULTIES[difficulty].cols}, max-content)` }}
             onContextMenu={(e) => e.preventDefault()}
           >
             {board.map((row, r) => 
