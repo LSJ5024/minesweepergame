@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 // 난이도 설정
 const DIFFICULTIES = {
@@ -28,7 +28,100 @@ export default function App() {
   const [firstClick, setFirstClick] = useState(true);
   
   // 모바일/터치 환경을 위한 조작 모드 (파기 vs 깃발 꽂기)
-  const [interactionMode, setInteractionMode] = useState('dig'); // 'dig', 'flag'
+  const [interactionMode, setInteractionMode] = useState('dig');
+
+  // 🎵 사운드 관련 상태 및 Ref
+  const [isBgmPlaying, setIsBgmPlaying] = useState(false);
+  const [isSfxEnabled, setIsSfxEnabled] = useState(true);
+  const bgmRef = useRef(null);
+
+  // 🎵 배경음악 재생 제어
+  useEffect(() => {
+    if (bgmRef.current) {
+      if (isBgmPlaying) {
+        bgmRef.current.play().catch(e => console.log("브라우저 자동재생 정책 차단", e));
+      } else {
+        bgmRef.current.pause();
+      }
+    }
+  }, [isBgmPlaying]);
+
+  // 🔊 효과음 생성기 (Web Audio API - 외부 파일 없이 소리 생성!)
+  const playSound = useCallback((type) => {
+    if (!isSfxEnabled) return;
+    
+    if (!window.audioCtx) {
+      window.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    const ctx = window.audioCtx;
+    if (ctx.state === 'suspended') ctx.resume();
+
+    const osc = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    
+    osc.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    const now = ctx.currentTime;
+
+    if (type === 'dig') {
+      // 흙 파는 소리 (짧고 뭉툭한 소리)
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(600, now);
+      osc.frequency.exponentialRampToValueAtTime(300, now + 0.1);
+      gainNode.gain.setValueAtTime(0.3, now);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+      osc.start(now);
+      osc.stop(now + 0.1);
+    } else if (type === 'flag') {
+      // 깃발 꽂는 소리 (경쾌하게 올라가는 소리)
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(400, now);
+      osc.frequency.linearRampToValueAtTime(800, now + 0.1);
+      gainNode.gain.setValueAtTime(0.2, now);
+      gainNode.gain.linearRampToValueAtTime(0.01, now + 0.1);
+      osc.start(now);
+      osc.stop(now + 0.1);
+    } else if (type === 'mine') {
+      // 폭발음 (화이트 노이즈 필터링)
+      const bufferSize = ctx.sampleRate * 0.5;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+      const noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+      
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(1000, now);
+      filter.frequency.exponentialRampToValueAtTime(100, now + 0.5);
+      
+      const noiseGain = ctx.createGain();
+      noiseGain.gain.setValueAtTime(1, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+
+      noise.connect(filter);
+      filter.connect(noiseGain);
+      noiseGain.connect(ctx.destination);
+      noise.start(now);
+    } else if (type === 'win') {
+      // 승리 팡파레 (아르페지오)
+      const freqs = [440, 554, 659, 880]; // A4, C#5, E5, A5
+      freqs.forEach((freq, i) => {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = 'square';
+        o.frequency.value = freq;
+        g.gain.setValueAtTime(0.1, now + i * 0.1);
+        g.gain.exponentialRampToValueAtTime(0.01, now + i * 0.1 + 0.1);
+        o.connect(g);
+        g.connect(ctx.destination);
+        o.start(now + i * 0.1);
+        o.stop(now + i * 0.1 + 0.1);
+      });
+    }
+  }, [isSfxEnabled]);
 
   // 보드 복사 헬퍼 함수
   const copyBoard = (b) => b.map(row => row.map(cell => ({ ...cell })));
@@ -64,30 +157,27 @@ export default function App() {
     let timer;
     if (status === 'playing') {
       timer = setInterval(() => {
-        setTime(prev => Math.min(prev + 1, 999)); // 최대 999초
+        setTime(prev => Math.min(prev + 1, 999));
       }, 1000);
     }
     return () => clearInterval(timer);
   }, [status]);
 
-  // 첫 클릭 시 지뢰 배치 및 숫자 계산 (첫 클릭에는 절대 지뢰가 없도록 보장)
+  // 첫 클릭 시 지뢰 배치 및 숫자 계산
   const placeMines = (startRow, startCol, currentBoard) => {
     const { rows, cols, mines } = DIFFICULTIES[difficulty];
     let minesPlaced = 0;
 
-    // 지뢰 배치
     while (minesPlaced < mines) {
       const r = Math.floor(Math.random() * rows);
       const c = Math.floor(Math.random() * cols);
       
-      // 첫 클릭 위치이거나 이미 지뢰가 있는 곳은 패스
       if (!currentBoard[r][c].isMine && !(r === startRow && c === startCol)) {
         currentBoard[r][c].isMine = true;
         minesPlaced++;
       }
     }
 
-    // 주변 지뢰 개수 계산
     for (let i = 0; i < rows; i++) {
       for (let j = 0; j < cols; j++) {
         if (!currentBoard[i][j].isMine) {
@@ -107,7 +197,7 @@ export default function App() {
     }
   };
 
-  // 빈 칸(0) 연속 열기 (Flood Fill 알고리즘)
+  // 빈 칸(0) 연속 열기
   const revealEmptyCells = (startRow, startCol, b) => {
     const { rows, cols } = DIFFICULTIES[difficulty];
     const stack = [[startRow, startCol]];
@@ -144,7 +234,7 @@ export default function App() {
 
     if (revealedCount === (rows * cols) - mines) {
       setStatus('won');
-      // 남은 지뢰에 모두 자동으로 깃발 꽂기
+      playSound('win'); // 🔊 승리 효과음
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
           if (b[r][c].isMine) {
@@ -153,17 +243,18 @@ export default function App() {
         }
       }
       setFlagsCount(mines);
+    } else {
+      playSound('dig'); // 🔊 일반 파기 효과음
     }
   };
 
-  // 셀 좌클릭 (또는 모바일 파기 모드 클릭)
+  // 셀 좌클릭
   const handleLeftClick = (r, c) => {
     if (status === 'won' || status === 'lost') return;
     
     const newBoard = copyBoard(board);
     const cell = newBoard[r][c];
 
-    // 이미 열렸거나 깃발이 꽂힌 경우 무시
     if (cell.isRevealed || cell.isFlagged) return;
 
     if (firstClick) {
@@ -175,14 +266,14 @@ export default function App() {
     // 지뢰를 클릭한 경우
     if (newBoard[r][c].isMine) {
       cell.causedLoss = true;
-      // 모든 지뢰 공개
+      playSound('mine'); // 🔊 지뢰 폭발음
+      
       const { rows, cols } = DIFFICULTIES[difficulty];
       for (let i = 0; i < rows; i++) {
         for (let j = 0; j < cols; j++) {
           if (newBoard[i][j].isMine && !newBoard[i][j].isFlagged) {
             newBoard[i][j].isRevealed = true;
           } else if (!newBoard[i][j].isMine && newBoard[i][j].isFlagged) {
-            // 잘못 꽂은 깃발 표시
             newBoard[i][j].exploded = true; 
           }
         }
@@ -198,7 +289,7 @@ export default function App() {
     checkWin(newBoard);
   };
 
-  // 셀 우클릭 (또는 모바일 깃발 모드 클릭)
+  // 셀 우클릭 (깃발)
   const handleRightClick = (e, r, c) => {
     if (e) e.preventDefault();
     if (status === 'won' || status === 'lost') return;
@@ -209,11 +300,12 @@ export default function App() {
     if (cell.isRevealed) return;
 
     cell.isFlagged = !cell.isFlagged;
+    playSound('flag'); // 🔊 깃발 꽂기 효과음
     setFlagsCount(prev => cell.isFlagged ? prev + 1 : prev - 1);
     setBoard(newBoard);
   };
 
-  // 통합 클릭 핸들러 (현재 모드에 따라 분기)
+  // 통합 클릭 핸들러
   const handleCellClick = (e, r, c) => {
     if (interactionMode === 'flag') {
       handleRightClick(null, r, c);
@@ -222,16 +314,16 @@ export default function App() {
     }
   };
 
-  // 상태에 따른 스마일리 아이콘
+  // 상태에 따른 스마일리
   const getSmiley = () => {
     if (status === 'won') return '😎';
     if (status === 'lost') return '😵';
     return '😐';
   };
 
-  // 숫자 포맷팅 (000 형태)
+  // 숫자 포맷팅
   const formatNumber = (num) => {
-    const parsed = Math.max(-99, Math.min(999, num)); // -99 ~ 999 제한
+    const parsed = Math.max(-99, Math.min(999, num));
     const isNegative = parsed < 0;
     const absStr = Math.abs(parsed).toString().padStart(isNegative ? 2 : 3, '0');
     return isNegative ? `-${absStr}` : absStr;
@@ -242,14 +334,23 @@ export default function App() {
   return (
     <div className="min-h-screen bg-neutral-900 flex flex-col items-center justify-center p-4 font-sans text-neutral-800">
       
+      {/* 🎵 HTML 오디오 태그 (배경음악) */}
+      <audio 
+        ref={bgmRef} 
+        src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" 
+        loop 
+      />
+
       {/* 헤더 및 설정 영역 */}
       <div className="mb-6 text-center">
         <h1 className="text-3xl font-bold text-white mb-4">지뢰찾기</h1>
-        <div className="flex gap-2 justify-center">
+        
+        {/* 난이도 버튼 */}
+        <div className="flex gap-2 justify-center mb-4">
           {Object.entries(DIFFICULTIES).map(([key, data]) => (
             <button
               key={key}
-              onClick={() => setDifficulty(key)}
+              onClick={() => initBoard(key)} // 난이도 변경 시 바로 초기화
               className={`px-4 py-2 rounded-md font-semibold transition-colors ${
                 difficulty === key 
                   ? 'bg-blue-600 text-white shadow-lg' 
@@ -260,12 +361,31 @@ export default function App() {
             </button>
           ))}
         </div>
+
+        {/* 🔊 사운드 컨트롤 버튼 */}
+        <div className="flex gap-3 justify-center">
+          <button 
+            onClick={() => setIsBgmPlaying(!isBgmPlaying)}
+            className={`px-3 py-1.5 rounded-full text-sm font-bold border-2 transition-colors ${
+              isBgmPlaying ? 'border-green-500 text-green-400 bg-green-900/30' : 'border-neutral-600 text-neutral-500'
+            }`}
+          >
+            {isBgmPlaying ? '🎵 BGM 켜짐' : '🔇 BGM 꺼짐'}
+          </button>
+          <button 
+            onClick={() => setIsSfxEnabled(!isSfxEnabled)}
+            className={`px-3 py-1.5 rounded-full text-sm font-bold border-2 transition-colors ${
+              isSfxEnabled ? 'border-blue-500 text-blue-400 bg-blue-900/30' : 'border-neutral-600 text-neutral-500'
+            }`}
+          >
+            {isSfxEnabled ? '🔊 효과음 켜짐' : '🔈 효과음 꺼짐'}
+          </button>
+        </div>
       </div>
 
-      {/* 게임 보드 컨테이너 */}
+      {/* 게임 보드 */}
       <div className="bg-neutral-300 p-4 rounded-xl shadow-2xl border-4 border-neutral-400 select-none">
-        
-        {/* 상단 전광판 (지뢰 개수, 리셋, 시간) */}
+        {/* 상단 전광판 */}
         <div className="flex justify-between items-center bg-neutral-800 p-3 rounded-lg border-4 border-neutral-700 mb-4 border-t-neutral-900 border-l-neutral-900">
           <div className="text-red-500 font-mono text-3xl tracking-widest bg-black px-2 py-1 rounded shadow-inner">
             {formatNumber(minesLeft)}
@@ -286,21 +406,17 @@ export default function App() {
           <div 
             className="grid gap-[1px] bg-neutral-500 border-2 border-neutral-600 p-[1px]"
             style={{ gridTemplateColumns: `repeat(${DIFFICULTIES[difficulty].cols}, minmax(0, 1fr))` }}
-            onContextMenu={(e) => e.preventDefault()} // 게임보드 전체 우클릭 방지
+            onContextMenu={(e) => e.preventDefault()}
           >
             {board.map((row, r) => 
               row.map((cell, c) => {
-                
-                // 셀 스타일 결정
                 let cellClass = "w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center text-xl font-bold ";
                 
                 if (!cell.isRevealed) {
-                  // 안 열린 상태 (입체감 있는 버튼)
                   cellClass += "bg-neutral-300 border-[3px] border-t-white border-l-white border-b-neutral-500 border-r-neutral-500 hover:bg-neutral-200 cursor-pointer";
                 } else {
-                  // 열린 상태 (평평하게)
                   if (cell.causedLoss) {
-                    cellClass += "bg-red-500 border-[1px] border-neutral-400"; // 클릭해서 터진 지뢰
+                    cellClass += "bg-red-500 border-[1px] border-neutral-400";
                   } else {
                     cellClass += "bg-neutral-200 border-[1px] border-neutral-400";
                   }
@@ -315,7 +431,7 @@ export default function App() {
                   >
                     {cell.isRevealed ? (
                       cell.isMine ? '💣' : 
-                      cell.exploded ? '❌' : // 잘못 꽂은 깃발
+                      cell.exploded ? '❌' : 
                       cell.neighborMines > 0 ? (
                         <span className={NUMBER_COLORS[cell.neighborMines] || 'text-black'}>
                           {cell.neighborMines}
@@ -332,7 +448,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* 모바일 조작 모드 토글 (화면이 작을 때 특히 유용함) */}
+      {/* 모바일 조작 모드 토글 */}
       <div className="mt-8 flex gap-4 bg-neutral-800 p-2 rounded-full border border-neutral-700">
         <button 
           onClick={() => setInteractionMode('dig')}
